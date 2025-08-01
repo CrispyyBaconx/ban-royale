@@ -649,7 +649,8 @@ class Main(commands.Cog):
     
     async def perform_mass_unban(self, ctx, banned_users):
         """Helper function to perform mass unban with progress tracking"""
-        total_users = len(banned_users)
+        # Count only actual user IDs (exclude special keys that start with underscore)
+        total_users = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
         unbanned_count = 0
         failed_count = 0
         processed_count = 0
@@ -663,6 +664,9 @@ class Main(commands.Cog):
         banned_users_list = list(banned_users.items())
         
         for i, (user_id_str, user_info) in enumerate(banned_users_list):
+            # Skip special keys that start with underscore (like '_logged_checkpoints')
+            if user_id_str.startswith('_'):
+                continue
             user_id = int(user_id_str)
             processed_count += 1
             
