@@ -238,8 +238,10 @@ class Main(commands.Cog):
         if self.enabled:
             return await ctx.send(f"{ctx.author.mention}, Ban Royale is already enabled!")
         
+        allowed_mentions = discord.AllowedMentions(everyone=True)
+        
         # Start countdown sequence with @everyone ping
-        countdown_msg = await ctx.send("@everyone 🚀 **Ban Royale Game Starting in 10 seconds!** 🚀")
+        countdown_msg = await ctx.send("@everyone 🚀 **Ban Royale Game Starting in 10 seconds!** 🚀", allowed_mentions=allowed_mentions)
         await asyncio.sleep(5)  # Wait 5 seconds (10 -> 5)
         
         await countdown_msg.edit(content="@everyone ⏰ **Game Starting in 5 seconds!** ⏰")
