@@ -1,20 +1,22 @@
 from discord.ext import commands
 
+from main import Main
+
 class DecayCommands(commands.Cog):
     """Decay mode commands for Ban Royale (dynamic ban chance based on participants)"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.main_cog = None  # Will be set by main.py
     
-    def get_main_cog(self):
+    def get_main_cog(self) -> 'Main':
         """Get reference to main cog for shared functionality"""
         if self.main_cog is None:
             self.main_cog = self.bot.get_cog('Main')
         return self.main_cog
 
     @commands.command(name="decay", aliases=['d'])
-    async def _decay(self, ctx):
+    async def _decay(self, ctx: commands.Context):
         """Toggle decay mode on/off"""
         main = self.get_main_cog()
         if not main:
@@ -33,7 +35,7 @@ class DecayCommands(commands.Cog):
             await ctx.send(f"📊 Effective members for decay calculations: **{effective_count}** (excluding bots and bot masters)")
 
     @commands.command(name="decaymin", aliases=['dmin'])
-    async def _decaymin(self, ctx):
+    async def _decaymin(self, ctx: commands.Context):
         """Set the minimum decay chance percentage"""
         main = self.get_main_cog()
         if not main:
@@ -62,7 +64,7 @@ class DecayCommands(commands.Cog):
         await ctx.send(f"Minimum decay chance has been set to **{chance*100:.1f}%**!")
 
     @commands.command(name="decaymax", aliases=['dmax'])
-    async def _decaymax(self, ctx):
+    async def _decaymax(self, ctx: commands.Context):
         """Set the maximum decay chance percentage"""
         main = self.get_main_cog()
         if not main:
@@ -91,6 +93,6 @@ class DecayCommands(commands.Cog):
         await ctx.send(f"Maximum decay chance has been set to **{chance*100:.1f}%**!")
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     """Setup function for the cog"""
     await bot.add_cog(DecayCommands(bot))

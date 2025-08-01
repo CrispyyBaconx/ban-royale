@@ -3,21 +3,23 @@ import random
 import asyncio
 from discord.ext import commands
 
+from main import Main
+
 class BasicCommands(commands.Cog):
     """Basic Ban Royale commands (enable, disable, ban, etc.)"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.main_cog = None  # Will be set by main.py
     
-    def get_main_cog(self):
+    def get_main_cog(self) -> 'Main':
         """Get reference to main cog for shared functionality"""
         if self.main_cog is None:
             self.main_cog = self.bot.get_cog('Main')
         return self.main_cog
 
     @commands.command(name="enable", aliases=['start'])
-    async def _enable(self, ctx):
+    async def _enable(self, ctx: commands.Context):
         """Enable the Ban Royale functionality with countdown"""
         main = self.get_main_cog()
         if not main:
@@ -85,7 +87,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(f"✅ Ban Royale has been **enabled**! Session ban counts reset. **Let the games begin!** 🎯")
 
     @commands.command(name="disable")
-    async def _disable(self, ctx):
+    async def _disable(self, ctx: commands.Context):
         """Disable the Ban Royale functionality"""
         main = self.get_main_cog()
         if not main:
@@ -103,7 +105,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(f"Ban Royale has been **disabled**!")
 
     @commands.command(name="ban", aliases=['b'])
-    async def _ban(self, ctx, *, user=None):
+    async def _ban(self, ctx: commands.Context, *, user: discord.Member = None):
         """Ban a user with a chance of failure"""
         main = self.get_main_cog()
         if not main:
@@ -202,7 +204,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(f"{ctx.author.mention}, your attempted ban against **{user.name}** failed! (lol)")
 
     @commands.command(name="banchance", aliases=['bc'])
-    async def _banchance(self, ctx):
+    async def _banchance(self, ctx: commands.Context):
         """Set the chance of a ban being successful"""
         main = self.get_main_cog()
         if not main:
@@ -233,7 +235,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(f"Ban chance has been set to **{chance*100}%**!")
 
     @commands.command(name="bandelay", aliases=['bd'])
-    async def _bandelay(self, ctx):
+    async def _bandelay(self, ctx: commands.Context):
         """Set the delay between ban operations in seconds"""
         main = self.get_main_cog()
         if not main:
@@ -264,7 +266,7 @@ class BasicCommands(commands.Cog):
             await ctx.send(f"Ban delay has been set to **{delay} seconds**!")
 
     @commands.command(name="help", aliases=['h', 'commands'])
-    async def _help(self, ctx):
+    async def _help(self, ctx: commands.Context):
         """Display all available commands"""
         embed = discord.Embed(
             title="🤖 Ban Royale Commands",
@@ -326,7 +328,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="config", aliases=['cfg'])
-    async def _config(self, ctx):
+    async def _config(self, ctx: commands.Context):
         """Display current bot configuration"""
         main = self.get_main_cog()
         if not main:
@@ -400,7 +402,7 @@ class BasicCommands(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="endgame", aliases=['eg'])
-    async def _end_game(self, ctx):
+    async def _end_game(self, ctx: commands.Context):
         """Manually end the current game, disable bot, and unban all participants"""
         main = self.get_main_cog()
         if not main:
@@ -503,6 +505,6 @@ class BasicCommands(commands.Cog):
             await log_channel.send(log_msg)
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     """Setup function for the cog"""
     await bot.add_cog(BasicCommands(bot))

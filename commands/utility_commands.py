@@ -1,21 +1,23 @@
 import discord
 from discord.ext import commands
 
+from main import Main
+
 class UtilityCommands(commands.Cog):
     """Utility commands for Ban Royale (remaining participants, etc.)"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.main_cog = None  # Will be set by main.py
     
-    def get_main_cog(self):
+    def get_main_cog(self) -> 'Main':
         """Get reference to main cog for shared functionality"""
         if self.main_cog is None:
             self.main_cog = self.bot.get_cog('Main')
         return self.main_cog
 
     @commands.command(name="remaining", aliases=['r'])
-    async def _remaining(self, ctx):
+    async def _remaining(self, ctx: commands.Context):
         """Show how many participants remain in the current game"""
         main = self.get_main_cog()
         if not main:
@@ -82,6 +84,6 @@ class UtilityCommands(commands.Cog):
         
         await ctx.send(embed=embed)
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     """Setup function for the cog"""
     await bot.add_cog(UtilityCommands(bot))

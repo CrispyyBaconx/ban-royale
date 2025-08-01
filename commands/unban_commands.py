@@ -2,21 +2,23 @@ import discord
 import asyncio
 from discord.ext import commands
 
+from main import Main
+
 class UnbanCommands(commands.Cog):
     """Unban commands for Ban Royale (mass unban functionality)"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.main_cog = None  # Will be set by main.py
     
-    def get_main_cog(self):
+    def get_main_cog(self) -> 'Main':
         """Get reference to main cog for shared functionality"""
         if self.main_cog is None:
             self.main_cog = self.bot.get_cog('Main')
         return self.main_cog
 
     @commands.command(name="unbanall", aliases=['ua'])
-    async def _unbanall(self, ctx):
+    async def _unbanall(self, ctx: commands.Context):
         """Unban all users who were banned during the event"""
         main = self.get_main_cog()
         if not main:
@@ -107,6 +109,6 @@ class UnbanCommands(commands.Cog):
             await log_channel.send(f"{ctx.author.mention} performed a mass unban of event participants! Unbanned: {unbanned_count}, Failed: {failed_count}")
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     """Setup function for the cog"""
     await bot.add_cog(UnbanCommands(bot))

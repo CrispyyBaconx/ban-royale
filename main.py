@@ -1,5 +1,4 @@
 import discord
-import random
 import os
 import json
 import asyncio
@@ -7,14 +6,8 @@ from datetime import datetime
 from discord.ext import commands
 from dotenv import load_dotenv
 
-# TODO:
-# ✅ implement inverse curve for ban chance as more people are banned (DONE - decay mode)
-# exclude users above bot role + those with bot master
-
-# Load environment variables from .env file
 load_dotenv()
 
-# Load configuration (with .env file support)
 CONFIG = {
     "bot_master": int(os.getenv('BOT_MASTER_ROLE', '1400583988783091803')),
     "ban_logs": int(os.getenv('BAN_LOGS_CHANNEL', '1400615174737498132')),
@@ -52,7 +45,6 @@ class BotRoyaleBot(commands.Bot):
         """Called when the bot is starting up"""
         await self.add_cog(Main(self))
         
-        # Load all command modules
         command_modules = [
             'commands.basic_commands',
             'commands.utility_commands', 
@@ -88,7 +80,7 @@ class Main(commands.Cog):
         self.session_ban_counts = {}  # Track ban counts per user per session
         self.initial_participants = {}  # Track who was in the game when it started {guild_id: set(user_ids)}
 
-    def load_all_banned_data(self):
+    def load_all_banned_data(self) -> dict:
         """Load all banned users data from the file"""
         try:
             with open(self.banned_users_file, 'r') as f:
@@ -96,12 +88,12 @@ class Main(commands.Cog):
         except FileNotFoundError:
             return {}
     
-    def load_banned_users(self, guild_id):
+    def load_banned_users(self, guild_id: int) -> dict:
         """Load the list of users banned during the event for a specific server"""
         all_data = self.load_all_banned_data()
         return all_data.get(str(guild_id), {})
     
-    def save_banned_user(self, guild_id, user_id, username, banned_by):
+    def save_banned_user(self, guild_id: int, user_id: int, username: str, banned_by: str):
         """Save a banned user to the tracking file for a specific server"""
         all_data = self.load_all_banned_data()
         guild_id_str = str(guild_id)
@@ -120,7 +112,7 @@ class Main(commands.Cog):
         with open(self.banned_users_file, 'w') as f:
             json.dump(all_data, f, indent=2)
     
-    def remove_banned_user(self, guild_id, user_id):
+    def remove_banned_user(self, guild_id: int, user_id: int):
         """Remove a user from the banned users tracking file for a specific server"""
         all_data = self.load_all_banned_data()
         guild_id_str = str(guild_id)
@@ -138,7 +130,7 @@ class Main(commands.Cog):
             return True
         return False
 
-    def get_effective_member_count(self, guild):
+    def get_effective_member_count(self, guild: discord.Guild) -> int:
         """Get the effective member count for decay calculations (excluding bots, bot masters, and those above bot role)"""
         if not guild:
             return 0
@@ -165,7 +157,7 @@ class Main(commands.Cog):
         
         return effective_count
     
-    def get_remaining_members(self, guild):
+    def get_remaining_members(self, guild: discord.Guild) -> list[discord.Member]:
         """Get list of members who are still in the game (not banned, not bots, not bot masters, not above bot role)"""
         if not guild:
             return []
@@ -198,13 +190,13 @@ class Main(commands.Cog):
         
         return remaining_members
     
-    def get_logged_checkpoints(self, guild_id):
+    def get_logged_checkpoints(self, guild_id: int) -> list[int]:
         """Get the list of checkpoints already logged for a server"""
         all_data = self.load_all_banned_data()
         guild_data = all_data.get(str(guild_id), {})
         return guild_data.get("_logged_checkpoints", [])
     
-    def add_logged_checkpoint(self, guild_id, checkpoint):
+    def add_logged_checkpoint(self, guild_id: int, checkpoint: int) -> None:
         """Add a checkpoint to the logged list for a server"""
         all_data = self.load_all_banned_data()
         guild_id_str = str(guild_id)
@@ -220,7 +212,7 @@ class Main(commands.Cog):
             with open(self.banned_users_file, 'w') as f:
                 json.dump(all_data, f, indent=2)
     
-    async def check_and_log_checkpoints(self, guild):
+    async def check_and_log_checkpoints(self, guild: discord.Guild) -> None:
         """Check if we've hit new decay checkpoints and log them"""
         if not self.config['decay_mode'] or not guild:
             return
@@ -252,7 +244,7 @@ class Main(commands.Cog):
                 # Mark this checkpoint as logged
                 self.add_logged_checkpoint(guild.id, checkpoint)
     
-    def calculate_decay_chance(self, guild):
+    def calculate_decay_chance(self, guild: discord.Guild) -> float:
         """Calculate ban chance using decay mode (inverse curve)"""
         if not guild:
             return self.config['ban_chance']
@@ -279,14 +271,14 @@ class Main(commands.Cog):
         
         return decay_chance
     
-    def get_current_ban_chance(self, guild):
+    def get_current_ban_chance(self, guild: discord.Guild) -> float:
         """Get the current ban chance (either normal or decay mode)"""
         if self.config['decay_mode']:
             return self.calculate_decay_chance(guild)
         else:
             return self.config['ban_chance']
 
-    def reset_game_state(self, guild_id):
+    def reset_game_state(self, guild_id: int) -> bool:
         """Reset all game state for a server (checkpoints and banned users)"""
         all_data = self.load_all_banned_data()
         guild_id_str = str(guild_id)
@@ -306,7 +298,7 @@ class Main(commands.Cog):
             return True
         return False
     
-    async def get_or_create_spectator_role(self, guild):
+    async def get_or_create_spectator_role(self, guild: discord.Guild) -> discord.Role:
         """Get or create the spectator role for the guild"""
         spectator_role_name = self.config['spectator_role']
         
@@ -328,7 +320,7 @@ class Main(commands.Cog):
             print(f"❌ [CONSOLE] Failed to create spectator role in {guild.name} - insufficient permissions")
             return None
     
-    async def clear_spectator_roles(self, guild):
+    async def clear_spectator_roles(self, guild: discord.Guild) -> None:
         """Remove spectator role from all members and delete the role"""
         spectator_role_name = self.config['spectator_role']
         
@@ -401,7 +393,7 @@ class Main(commands.Cog):
                 except discord.Forbidden:
                     print(f"❌ [CONSOLE] Failed to add spectator role to {member.display_name}")
 
-    async def check_win_condition(self, guild):
+    async def check_win_condition(self, guild: discord.Guild) -> bool:
         """Check if win condition is met and handle game end"""
         if not self.enabled or not guild:
             return False
@@ -489,7 +481,7 @@ class Main(commands.Cog):
         
         return False
 
-    def get_progress_increment(self, total_users):
+    def get_progress_increment(self, total_users: int) -> int:
         """Calculate appropriate progress update increment based on total users"""
         if total_users <= 10:
             return 1  # Update every user
@@ -502,7 +494,7 @@ class Main(commands.Cog):
         else:
             return max(25, total_users // 10)  # Update every 25 users or 10% of total, whichever is larger
     
-    async def perform_mass_unban(self, ctx, banned_users):
+    async def perform_mass_unban(self, ctx: commands.Context, banned_users: dict) -> tuple[int, int]:
         """Helper function to perform mass unban with progress tracking"""
         # Count only actual user IDs (exclude special keys that start with underscore)
         total_users = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
