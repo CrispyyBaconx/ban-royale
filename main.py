@@ -763,6 +763,14 @@ class Main(commands.Cog):
         if log_channel:
             await log_channel.send(f"{ctx.author.mention} performed a mass unban of event participants! Unbanned: {unbanned_count}, Failed: {failed_count}")
 
+    @commands.command(name="goon", aliases=['g'])
+    async def _goon(self, ctx):
+        """If you really want to"""
+        # anyone can use this command
+        # it just kicks the person who sent the command
+        await ctx.author.kick(reason="You were kicked for gooning in a server full of children, seek help")
+        await ctx.send(f"{ctx.author.mention} was kicked for gooning in a server full of children")
+
 # Run the bot
 if __name__ == "__main__":
     # Get bot token from environment variables
