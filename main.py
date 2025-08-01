@@ -25,6 +25,7 @@ CONFIG = {
     "min_decay_chance": float(os.getenv('MIN_DECAY_CHANCE', '0.01')),
     "max_decay_chance": float(os.getenv('MAX_DECAY_CHANCE', '0.99')),
     "react_emoji": os.getenv('REACT_EMOJI', '✅'),
+    "spectator_role": os.getenv('SPECTATOR_ROLE_NAME', 'Ban Royale Spectator')
 }
 
 class BotRoyaleBot(commands.Bot):
@@ -68,6 +69,7 @@ class Main(commands.Cog):
         self.enabled = False
         self.banned_users_file = "event_banned_users.json"
         self.session_ban_counts = {}  # Track ban counts per user per session
+        self.initial_participants = {}  # Track who was in the game when it started {guild_id: set(user_ids)}
 
     def load_all_banned_data(self):
         """Load all banned users data from the file"""
@@ -120,12 +122,14 @@ class Main(commands.Cog):
         return False
 
     def get_effective_member_count(self, guild):
-        """Get the effective member count for decay calculations (excluding bots and bot masters)"""
+        """Get the effective member count for decay calculations (excluding bots, bot masters, and those above bot role)"""
         if not guild:
             return 0
         
         effective_count = 0
         bot_master_role_id = self.config['bot_master']
+        bot_member = guild.get_member(self.bot.user.id)
+        bot_top_role_position = bot_member.top_role.position if bot_member else 0
         
         for member in guild.members:
             # Skip bots
@@ -136,9 +140,46 @@ class Main(commands.Cog):
             if any(role.id == bot_master_role_id for role in member.roles):
                 continue
             
+            # Skip users with roles above the bot
+            if member.top_role.position >= bot_top_role_position:
+                continue
+            
             effective_count += 1
         
         return effective_count
+    
+    def get_remaining_members(self, guild):
+        """Get list of members who are still in the game (not banned, not bots, not bot masters, not above bot role)"""
+        if not guild:
+            return []
+        
+        banned_users = self.load_banned_users(guild.id)
+        banned_user_ids = set([int(user_id) for user_id in banned_users.keys() if not user_id.startswith('_')])
+        bot_master_role_id = self.config['bot_master']
+        bot_member = guild.get_member(self.bot.user.id)
+        bot_top_role_position = bot_member.top_role.position if bot_member else 0
+        
+        remaining_members = []
+        for member in guild.members:
+            # Skip bots
+            if member.bot:
+                continue
+            
+            # Skip users with bot master role
+            if any(role.id == bot_master_role_id for role in member.roles):
+                continue
+            
+            # Skip users with roles above the bot
+            if member.top_role.position >= bot_top_role_position:
+                continue
+            
+            # Skip banned users
+            if member.id in banned_user_ids:
+                continue
+                
+            remaining_members.append(member)
+        
+        return remaining_members
     
     def get_logged_checkpoints(self, guild_id):
         """Get the list of checkpoints already logged for a server"""
@@ -266,6 +307,29 @@ class Main(commands.Cog):
         # Reset ban counts for new game
         self.session_ban_counts.clear()
         
+        # Record initial participants (who was here when game started)
+        initial_members = set()
+        bot_master_role_id = self.config['bot_master']
+        bot_member = ctx.guild.get_member(self.bot.user.id)
+        bot_top_role_position = bot_member.top_role.position if bot_member else 0
+        
+        for member in ctx.guild.members:
+            # Skip bots
+            if member.bot:
+                continue
+            # Skip users with bot master role
+            if any(role.id == bot_master_role_id for role in member.roles):
+                continue
+            # Skip users with roles above the bot
+            if member.top_role.position >= bot_top_role_position:
+                continue
+            initial_members.add(member.id)
+        
+        self.initial_participants[ctx.guild.id] = initial_members
+        
+        # Console log
+        print(f"🚀 [CONSOLE] Ban Royale ENABLED in {ctx.guild.name} by {ctx.author.name} - {len(initial_members)} initial participants")
+        
         # Send final status message
         await ctx.send(f"✅ Ban Royale has been **enabled**! Session ban counts reset. **Let the games begin!** 🎯")
 
@@ -280,6 +344,7 @@ class Main(commands.Cog):
             return await ctx.send(f"{ctx.author.mention}, Ban Royale is already disabled!")
         
         self.enabled = False
+        print(f"🔴 [CONSOLE] Ban Royale DISABLED in {ctx.guild.name} by {ctx.author.name}")
         await ctx.send(f"Ban Royale has been **disabled**!")
 
     @commands.command(name="ban", aliases=['b'])
@@ -310,6 +375,12 @@ class Main(commands.Cog):
         # Only apply role hierarchy check if the author has roles above @everyone
         if ctx.author.top_role.position > 0 and ctx.author.top_role.position <= user.top_role.position:
             return await ctx.send(f"{ctx.author.mention}, You can't ban that person!")
+        
+        # Check if user has spectator role (mid-game joiner)
+        spectator_role_name = self.config['spectator_role']
+        for role in ctx.author.roles:
+            if role.name == spectator_role_name:
+                return await ctx.send(f"{ctx.author.mention}, Spectators cannot use ban commands! You joined mid-game.")
 
         current_chance = self.get_current_ban_chance(ctx.guild)
         if random.random() < current_chance:
@@ -319,12 +390,12 @@ class Main(commands.Cog):
             
             while retry_count < max_retries and not success:
                 try: 
-                    await user.ban(reason=f"Ban Royale: Banned by {ctx.author.name}")
+                    await user.ban(reason=f"Ban Royale: Banned by {ctx.author.name}", delete_message_seconds=1)
                     # Track the banned user
                     self.save_banned_user(ctx.guild.id, user.id, user.name, ctx.author.name)
                     success = True
                 except discord.Forbidden: 
-                    return await ctx.send("I don't have permissions to do that. Please contact an admin to fix this.")
+                    return await ctx.send(f"{ctx.author.mention}, Can't ban this user! (insufficient permissions)")
                 except discord.HTTPException as e:
                     if e.status == 429:  # Rate limited
                         retry_count += 1
@@ -537,8 +608,82 @@ class Main(commands.Cog):
             inline=False
         )
         
+        # Utility Commands
+        utility_commands = [
+            "`!remaining` or `!r` - Show how many participants remain in the current game"
+        ]
+        embed.add_field(
+            name="📊 Utility Commands",
+            value="\n".join(utility_commands),
+            inline=False
+        )
+        
         # Footer
         embed.set_footer(text="Note: Bot Master commands require the configured Bot Master role")
+        
+        await ctx.send(embed=embed)
+
+    @commands.command(name="remaining", aliases=['r'])
+    async def _remaining(self, ctx):
+        """Show how many participants remain in the current game"""
+        if not ctx.guild:
+            return await ctx.send("This command can only be used in servers.")
+        
+        if not self.enabled:
+            embed = discord.Embed(
+                title="📊 Game Status",
+                description="No Ban Royale game is currently active.",
+                color=0x808080
+            )
+            embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+            return await ctx.send(embed=embed)
+        
+        effective_count = self.get_effective_member_count(ctx.guild)
+        banned_users = self.load_banned_users(ctx.guild.id)
+        banned_count = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
+        remaining_members_list = self.get_remaining_members(ctx.guild)
+        remaining_count = len(remaining_members_list)
+        
+        # Calculate percentage
+        if effective_count > 0:
+            percentage_remaining = (remaining_count / effective_count) * 100
+            percentage_banned = (banned_count / effective_count) * 100
+        else:
+            percentage_remaining = 0
+            percentage_banned = 0
+        
+        embed = discord.Embed(
+            title="📊 Ban Royale Status",
+            description="Current game statistics",
+            color=0x00ff00 if remaining_count > 1 else 0xffd700
+        )
+        
+        embed.add_field(
+            name="👥 Participants Remaining",
+            value=f"**{remaining_count}** out of {effective_count} ({percentage_remaining:.1f}%)",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💀 Participants Banned",
+            value=f"**{banned_count}** out of {effective_count} ({percentage_banned:.1f}%)",
+            inline=False
+        )
+        
+        # Add status indicator
+        if remaining_count <= 1:
+            if remaining_count == 1:
+                embed.add_field(name="🏆 Status", value="**Winner determined!**", inline=False)
+            else:
+                embed.add_field(name="💀 Status", value="**Total elimination!**", inline=False)
+        elif remaining_count <= 5:
+            embed.add_field(name="🔥 Status", value="**Final showdown!**", inline=False)
+        elif remaining_count <= 10:
+            embed.add_field(name="⚡ Status", value="**Getting intense!**", inline=False)
+        else:
+            embed.add_field(name="🎯 Status", value="**Game in progress**", inline=False)
+        
+        embed.set_footer(text=f"Requested by {ctx.author.display_name}")
         
         await ctx.send(embed=embed)
 
@@ -620,6 +765,10 @@ class Main(commands.Cog):
         # Reset session ban counts
         self.session_ban_counts.clear()
         
+        # Clear initial participants tracking
+        if guild_id in self.initial_participants:
+            del self.initial_participants[guild_id]
+        
         if guild_id_str in all_data:
             del all_data[guild_id_str]
             
@@ -627,6 +776,101 @@ class Main(commands.Cog):
                 json.dump(all_data, f, indent=2)
             return True
         return False
+    
+    async def get_or_create_spectator_role(self, guild):
+        """Get or create the spectator role for the guild"""
+        spectator_role_name = self.config['spectator_role']
+        
+        # Check if role already exists
+        for role in guild.roles:
+            if role.name == spectator_role_name:
+                return role
+        
+        # Create the role if it doesn't exist
+        try:
+            role = await guild.create_role(
+                name=spectator_role_name,
+                color=discord.Color.gray(),
+                reason="Ban Royale spectator role for mid-game joiners"
+            )
+            print(f"📋 [CONSOLE] Created spectator role '{spectator_role_name}' in {guild.name}")
+            return role
+        except discord.Forbidden:
+            print(f"❌ [CONSOLE] Failed to create spectator role in {guild.name} - insufficient permissions")
+            return None
+    
+    async def clear_spectator_roles(self, guild):
+        """Remove spectator role from all members and delete the role"""
+        spectator_role_name = self.config['spectator_role']
+        
+        for role in guild.roles:
+            if role.name == spectator_role_name:
+                # Remove role from all members who have it
+                members_with_role = []
+                for member in guild.members:
+                    if role in member.roles:
+                        members_with_role.append(member.display_name)
+                        try:
+                            await member.remove_roles(role, reason="Ban Royale game ended")
+                        except discord.Forbidden:
+                            print(f"❌ [CONSOLE] Failed to remove spectator role from {member.display_name}")
+                
+                # Delete the role
+                try:
+                    await role.delete(reason="Ban Royale game ended")
+                    if members_with_role:
+                        print(f"🗑️ [CONSOLE] Removed spectator role from {len(members_with_role)} members in {guild.name}")
+                except discord.Forbidden:
+                    print(f"❌ [CONSOLE] Failed to delete spectator role in {guild.name}")
+                break
+    
+    @commands.Cog.listener()
+    async def on_member_join(self, member):
+        """Handle new members joining during an active game"""
+        if not self.enabled or member.bot:
+            return
+        
+        guild = member.guild
+        if guild.id not in self.initial_participants:
+            return  # No game was started in this guild
+        
+        # Check if this member was part of the initial participants
+        if member.id not in self.initial_participants[guild.id]:
+            # This is a mid-game joiner, add spectator role
+            spectator_role = await self.get_or_create_spectator_role(guild)
+            if spectator_role:
+                try:
+                    await member.add_roles(spectator_role, reason="Mid-game joiner - added to spectators")
+                    print(f"👀 [CONSOLE] Added spectator role to {member.display_name} (mid-game joiner) in {guild.name}")
+                    
+                    # Send a DM or welcome message explaining they're a spectator
+                    try:
+                        embed = discord.Embed(
+                            title="🎭 Welcome to the Ban Royale!",
+                            description=f"You joined **{guild.name}** during an active Ban Royale game.",
+                            color=0x808080
+                        )
+                        embed.add_field(
+                            name="👀 Spectator Status",
+                            value="You've been assigned as a spectator since the game was already in progress.",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="🚫 Restrictions",
+                            value="You cannot use `!ban` commands during this game.",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="⏰ Next Game",
+                            value="You'll be able to participate when the next game starts!",
+                            inline=False
+                        )
+                        await member.send(embed=embed)
+                    except discord.Forbidden:
+                        pass  # Can't send DM, that's fine
+                        
+                except discord.Forbidden:
+                    print(f"❌ [CONSOLE] Failed to add spectator role to {member.display_name}")
 
     async def check_win_condition(self, guild):
         """Check if win condition is met and handle game end"""
@@ -634,61 +878,83 @@ class Main(commands.Cog):
             return False
         
         effective_count = self.get_effective_member_count(guild)
-        banned_count = len(self.load_banned_users(guild.id))
-        remaining_members = effective_count - banned_count
+        banned_users = self.load_banned_users(guild.id)
+        banned_count = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
+        remaining_members_list = self.get_remaining_members(guild)
+        remaining_count = len(remaining_members_list)
         
-        if remaining_members <= 1:
+        if remaining_count <= 1:
             # Win condition met! Disable the bot but preserve game state
             self.enabled = False
             
+            # Console log
+            if remaining_count == 1:
+                winner = remaining_members_list[0]
+                print(f"🏆 [CONSOLE] Ban Royale WIN CONDITION met in {guild.name} - Winner: {winner.name}")
+            else:
+                print(f"💀 [CONSOLE] Ban Royale TOTAL ELIMINATION in {guild.name} - everyone banned!")
+            
+            # Get both channels
             log_channel = self.bot.get_channel(self.config['ban_logs'])
-            if log_channel:
-                if remaining_members == 1:
-                    win_embed = discord.Embed(
-                        title="🏆 GAME OVER - We Have a Winner! 🏆",
-                        description="**The Ban Royale has concluded with a victor!**",
-                        color=0xffd700  # Gold color
-                    )
-                    win_embed.add_field(
-                        name="🎯 Final Result",
-                        value=f"Only **1 participant** remains out of **{effective_count}** original members!",
-                        inline=False
-                    )
-                    win_embed.add_field(
-                        name="🔴 Bot Status",
-                        value="Ban Royale has been **disabled**",
-                        inline=True
-                    )
-                    win_embed.add_field(
-                        name="🔧 Next Steps",
-                        value="Use `!endgame` to unban all participants and reset for the next event",
-                        inline=True
-                    )
-                    win_embed.set_footer(text="🎉 Congratulations to the winner!")
+            ban_channel = self.bot.get_channel(self.config['ban_channel'])
+            
+            if remaining_count == 1:
+                winner = remaining_members_list[0]
+                win_embed = discord.Embed(
+                    title="🏆 GAME OVER - We Have a Winner! 🏆",
+                    description=f"**The Ban Royale has concluded with a victor!**\n\n🎉 **{winner.mention} is the CHAMPION!** 🎉",
+                    color=0xffd700  # Gold color
+                )
+                win_embed.add_field(
+                    name="🎯 Final Result",
+                    value=f"Only **1 participant** remains out of **{effective_count}** original members!",
+                    inline=False
+                )
+                win_embed.add_field(
+                    name="🔴 Bot Status",
+                    value="Ban Royale has been **disabled**",
+                    inline=True
+                )
+                win_embed.add_field(
+                    name="🔧 Next Steps",
+                    value="Use `!endgame` to unban all participants and reset for the next event",
+                    inline=True
+                )
+                win_embed.set_footer(text=f"🎉 Congratulations {winner.display_name}!")
+                
+                # Send to both channels
+                if log_channel:
                     await log_channel.send(embed=win_embed)
-                else:
-                    elimination_embed = discord.Embed(
-                        title="🏁 GAME OVER - Total Elimination! 🏁",
-                        description="**Every participant has been eliminated!**",
-                        color=0x8b0000  # Dark red color
-                    )
-                    elimination_embed.add_field(
-                        name="💀 Final Result",
-                        value=f"All **{effective_count}** participants have been banned!",
-                        inline=False
-                    )
-                    elimination_embed.add_field(
-                        name="🔴 Bot Status",
-                        value="Ban Royale has been **disabled**",
-                        inline=True
-                    )
-                    elimination_embed.add_field(
-                        name="🔧 Next Steps",
-                        value="Use `!endgame` to unban all participants and reset for the next event",
-                        inline=True
-                    )
-                    elimination_embed.set_footer(text="💀 No survivors remain...")
+                if ban_channel:
+                    await ban_channel.send(embed=win_embed)
+            else:
+                elimination_embed = discord.Embed(
+                    title="🏁 GAME OVER - Total Elimination! 🏁",
+                    description="**Every participant has been eliminated!**",
+                    color=0x8b0000  # Dark red color
+                )
+                elimination_embed.add_field(
+                    name="💀 Final Result",
+                    value=f"All **{effective_count}** participants have been banned!",
+                    inline=False
+                )
+                elimination_embed.add_field(
+                    name="🔴 Bot Status",
+                    value="Ban Royale has been **disabled**",
+                    inline=True
+                )
+                elimination_embed.add_field(
+                    name="🔧 Next Steps",
+                    value="Use `!endgame` to unban all participants and reset for the next event",
+                    inline=True
+                )
+                elimination_embed.set_footer(text="💀 No survivors remain...")
+                
+                # Send to both channels
+                if log_channel:
                     await log_channel.send(embed=elimination_embed)
+                if ban_channel:
+                    await ban_channel.send(embed=elimination_embed)
             
             return True
         
@@ -827,6 +1093,7 @@ class Main(commands.Cog):
         # Disable the bot (if not already disabled)
         if not was_already_disabled:
             self.enabled = False
+            print(f"🏁 [CONSOLE] Ban Royale ENDED manually in {ctx.guild.name} by {ctx.author.name}")
         
         # Reset decay mode if it was enabled
         if was_decay_mode:
@@ -834,6 +1101,9 @@ class Main(commands.Cog):
         
         # Reset game state (clear checkpoints and any remaining tracking)
         self.reset_game_state(ctx.guild.id)
+        
+        # Remove all spectator roles
+        await self.clear_spectator_roles(ctx.guild)
         
         # Final status embed
         final_embed = discord.Embed(

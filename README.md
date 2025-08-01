@@ -28,6 +28,9 @@ python main.py
 - `!config` or `!cfg` - Display current bot configuration in an embed (Bot Master only)
 - `!endgame` or `!eg` - End the current game, disable bot, unban all participants, and reset state (Bot Master only)
 
+### Utility Commands
+- `!remaining` or `!r` - Show how many participants remain in the current game (Anyone can use)
+
 ### Decay Mode Commands
 - `!decay` or `!d` - Toggle decay mode on/off (Bot Master only)
 - `!decaymin <percentage>` or `!dmin <percentage>` - Set minimum decay chance (Bot Master only)
@@ -145,6 +148,29 @@ Final stats: 99/100 participants were banned, 1 remain.
 - **Smart Member Counting**: Automatically excludes bots and bot masters from decay calculations
 - **Comprehensive Game Management**: Win condition detection for all game modes and complete shutdown functionality with `!endgame`
 - **Complete Reset Capability**: Manual game end includes bot disable, mass unban, decay reset, and state clearing
+- **Mid-Game Joiner Protection**: Automatic spectator role assignment for users who join during an active game, preventing unfair advantages
+
+## Spectator System
+
+The bot automatically handles users who join the server during an active Ban Royale game:
+
+### Automatic Spectator Assignment
+- **Mid-game joiners** are automatically assigned a "Ban Royale Spectator" role
+- **Spectators cannot use** `!ban` commands during the current game
+- **Automatic notification** via DM explaining their spectator status
+- **Fair play protection** ensures only original participants can compete
+
+### Spectator Features
+- **Real-time monitoring** of remaining participants via `!remaining` command
+- **Next game participation** - spectators can fully participate when a new game starts
+- **Automatic cleanup** - spectator roles are removed when the game ends
+- **Console logging** of all spectator assignments and removals
+
+### How It Works
+1. When a game starts with `!enable`, the bot records all current eligible members
+2. If someone joins mid-game, they're automatically detected and assigned spectator status
+3. Spectators receive a friendly DM explaining the system
+4. When the game ends, all spectator roles are automatically removed
 
 ## Configuration
 
