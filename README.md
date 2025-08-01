@@ -20,7 +20,7 @@ python main.py
 
 ### Basic Commands
 - `!help` or `!h` or `!commands` - Display all available commands in a formatted embed
-- `!enable` - Enable the bot royale functionality (Bot Master only)
+- `!enable` or `!start` - Enable the bot royale functionality with epic countdown (Bot Master only)
 - `!disable` - Disable the bot royale functionality (Bot Master only)
 - `!ban <user>` or `!b <user>` - Attempt to ban a user with a configurable chance
 - `!banchance <percentage>` or `!bc <percentage>` - Set the ban success chance (Bot Master only)

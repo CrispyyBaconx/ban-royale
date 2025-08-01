@@ -201,7 +201,7 @@ class Main(commands.Cog):
         
         effective_members = self.get_effective_member_count(guild)
         banned_users = self.load_banned_users(guild.id)
-        banned_count = len(banned_users)
+        banned_count = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
         
         if effective_members <= 0:
             # No valid members to calculate from, use default ban chance
@@ -228,9 +228,9 @@ class Main(commands.Cog):
         else:
             return self.config['ban_chance']
 
-    @commands.command(name="enable")
+    @commands.command(name="enable", aliases=['start'])
     async def _enable(self, ctx):
-        """Enable or disable the Ban Royale functionality"""
+        """Enable the Ban Royale functionality with countdown"""
         # Check if user has bot master role
         if not any(role.id == self.config['bot_master'] for role in ctx.author.roles):
             return await ctx.send(f"{ctx.author.mention}, You don't have permission to use this command!")
@@ -238,10 +238,34 @@ class Main(commands.Cog):
         if self.enabled:
             return await ctx.send(f"{ctx.author.mention}, Ban Royale is already enabled!")
         
+        # Start countdown sequence with @everyone ping
+        countdown_msg = await ctx.send("@everyone 🚀 **Ban Royale Game Starting in 10 seconds!** 🚀")
+        await asyncio.sleep(5)  # Wait 5 seconds (10 -> 5)
+        
+        await countdown_msg.edit(content="@everyone ⏰ **Game Starting in 5 seconds!** ⏰")
+        await asyncio.sleep(1)  # Wait 1 second (5 -> 4)
+        
+        await countdown_msg.edit(content="@everyone ⏰ **4** ⏰")
+        await asyncio.sleep(1)  # Wait 1 second (4 -> 3)
+        
+        await countdown_msg.edit(content="@everyone ⏰ **3** ⏰")
+        await asyncio.sleep(1)  # Wait 1 second (3 -> 2)
+        
+        await countdown_msg.edit(content="@everyone ⏰ **2** ⏰")
+        await asyncio.sleep(1)  # Wait 1 second (2 -> 1)
+        
+        await countdown_msg.edit(content="@everyone ⏰ **1** ⏰")
+        await asyncio.sleep(1)  # Wait 1 second (1 -> GO)
+        
+        await countdown_msg.edit(content="@everyone 🔥 **GO! BAN ROYALE IS LIVE!** 🔥")
+        
+        # Enable the bot
         self.enabled = True
         # Reset ban counts for new game
         self.session_ban_counts.clear()
-        await ctx.send(f"Ban Royale has been **enabled**! Session ban counts reset.")
+        
+        # Send final status message
+        await ctx.send(f"✅ Ban Royale has been **enabled**! Session ban counts reset. **Let the games begin!** 🎯")
 
     @commands.command(name="disable")
     async def _disable(self, ctx):
@@ -475,7 +499,7 @@ class Main(commands.Cog):
         
         # Basic Commands
         basic_commands = [
-            "`!enable` - Enable the bot royale functionality (Bot Master only)",
+            "`!enable` or `!start` - Enable the bot royale functionality with countdown (Bot Master only)",
             "`!disable` - Disable the bot royale functionality (Bot Master only)",
             "`!ban <user>` or `!b <user>` - Attempt to ban a user with a configurable chance",
             "`!banchance <percentage>` or `!bc <percentage>` - Set the ban success chance (Bot Master only)",
@@ -580,7 +604,7 @@ class Main(commands.Cog):
         
         # Server-specific stats  
         banned_users = self.load_banned_users(ctx.guild.id)
-        embed.add_field(name="Banned Users (This Server)", value=str(len(banned_users)), inline=True)
+        embed.add_field(name="Banned Users (This Server)", value=str(len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])), inline=True)
         
         embed.set_footer(text=f"Server: {ctx.guild.name}")
         
@@ -618,17 +642,51 @@ class Main(commands.Cog):
             log_channel = self.bot.get_channel(self.config['ban_logs'])
             if log_channel:
                 if remaining_members == 1:
-                    await log_channel.send(
-                        f"🏆 **GAME OVER - We have a winner!** 🏆\n"
-                        f"Only **1 participant** remains out of {effective_count} original members!\n"
-                        f"Ban Royale has been **disabled**. Use `!endgame` to unban all participants and reset for the next event."
+                    win_embed = discord.Embed(
+                        title="🏆 GAME OVER - We Have a Winner! 🏆",
+                        description="**The Ban Royale has concluded with a victor!**",
+                        color=0xffd700  # Gold color
                     )
+                    win_embed.add_field(
+                        name="🎯 Final Result",
+                        value=f"Only **1 participant** remains out of **{effective_count}** original members!",
+                        inline=False
+                    )
+                    win_embed.add_field(
+                        name="🔴 Bot Status",
+                        value="Ban Royale has been **disabled**",
+                        inline=True
+                    )
+                    win_embed.add_field(
+                        name="🔧 Next Steps",
+                        value="Use `!endgame` to unban all participants and reset for the next event",
+                        inline=True
+                    )
+                    win_embed.set_footer(text="🎉 Congratulations to the winner!")
+                    await log_channel.send(embed=win_embed)
                 else:
-                    await log_channel.send(
-                        f"🏁 **GAME OVER - All participants eliminated!** 🏁\n"
-                        f"All {effective_count} participants have been banned!\n"
-                        f"Ban Royale has been **disabled**. Use `!endgame` to unban all participants and reset for the next event."
+                    elimination_embed = discord.Embed(
+                        title="🏁 GAME OVER - Total Elimination! 🏁",
+                        description="**Every participant has been eliminated!**",
+                        color=0x8b0000  # Dark red color
                     )
+                    elimination_embed.add_field(
+                        name="💀 Final Result",
+                        value=f"All **{effective_count}** participants have been banned!",
+                        inline=False
+                    )
+                    elimination_embed.add_field(
+                        name="🔴 Bot Status",
+                        value="Ban Royale has been **disabled**",
+                        inline=True
+                    )
+                    elimination_embed.add_field(
+                        name="🔧 Next Steps",
+                        value="Use `!endgame` to unban all participants and reset for the next event",
+                        inline=True
+                    )
+                    elimination_embed.set_footer(text="💀 No survivors remain...")
+                    await log_channel.send(embed=elimination_embed)
             
             return True
         
@@ -726,23 +784,43 @@ class Main(commands.Cog):
         
         effective_count = self.get_effective_member_count(ctx.guild)
         banned_users = self.load_banned_users(ctx.guild.id)
-        banned_count = len(banned_users)
+        banned_count = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
         
         if banned_count == 0:
-            return await ctx.send(f"{ctx.author.mention}, No game is currently in progress!")
+            embed = discord.Embed(
+                title="❌ No Game in Progress",
+                description="There is no active game to end. No users are currently banned during this event.",
+                color=0xff6b6b
+            )
+            embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+            return await ctx.send(embed=embed)
         
         # Check current state
         was_decay_mode = self.config['decay_mode']
         was_already_disabled = not self.enabled
         remaining_count = effective_count - banned_count
         
-        if was_already_disabled:
-            await ctx.send(f"🏁 **Cleaning up completed game...**\nFinal stats: {banned_count}/{effective_count} participants were banned, {remaining_count} remain.")
-        else:
-            await ctx.send(f"🏁 **Ending game and shutting down Ban Royale...**\nFinal stats: {banned_count}/{effective_count} participants were banned, {remaining_count} remain.")
+        # Create initial status embed
+        embed = discord.Embed(
+            title="🏁 Ending Ban Royale Game",
+            color=0xffa500
+        )
         
-        # Perform mass unban
-        unbanned_count, failed_count = await self.perform_mass_unban(ctx, banned_users)
+        if was_already_disabled:
+            embed.description = "**Cleaning up completed game...**"
+        else:
+            embed.description = "**Ending game and shutting down Ban Royale...**"
+        
+        embed.add_field(name="📊 Final Statistics", value=f"**{banned_count}**/{effective_count} participants were banned\n**{remaining_count}** participants remain", inline=False)
+        embed.set_footer(text=f"Initiated by {ctx.author.display_name}")
+        
+        await ctx.send(embed=embed)
+        
+        # Perform mass unban only if there are users to unban
+        if banned_count > 0:
+            unbanned_count, failed_count = await self.perform_mass_unban(ctx, banned_users)
+        else:
+            unbanned_count, failed_count = 0, 0
         
         # Disable the bot (if not already disabled)
         if not was_already_disabled:
@@ -755,17 +833,31 @@ class Main(commands.Cog):
         # Reset game state (clear checkpoints and any remaining tracking)
         self.reset_game_state(ctx.guild.id)
         
-        # Final status message
-        status_msg = f"✅ **Game cleanup completed!**\n"
-        if not was_already_disabled:
-            status_msg += f"• Ban Royale has been **disabled**\n"
-        if was_decay_mode:
-            status_msg += f"• Decay mode has been **reset**\n"
-        status_msg += f"• Unbanned **{unbanned_count}** users (Failed: **{failed_count}**)\n"
-        status_msg += f"• Game state has been **cleared**\n"
-        status_msg += f"• Session ban counts have been **reset**"
+        # Final status embed
+        final_embed = discord.Embed(
+            title="✅ Game Cleanup Completed!",
+            color=0x00ff00
+        )
         
-        await ctx.send(status_msg)
+        cleanup_actions = []
+        if not was_already_disabled:
+            cleanup_actions.append("🔴 Ban Royale has been **disabled**")
+        if was_decay_mode:
+            cleanup_actions.append("📉 Decay mode has been **reset**")
+        if banned_count > 0:
+            cleanup_actions.append(f"🔓 Unbanned **{unbanned_count}** users (Failed: **{failed_count}**)")
+        cleanup_actions.append("🗑️ Game state has been **cleared**")
+        cleanup_actions.append("🔄 Session ban counts have been **reset**")
+        
+        final_embed.add_field(
+            name="🔧 Actions Completed",
+            value="\n".join(cleanup_actions),
+            inline=False
+        )
+        
+        final_embed.set_footer(text=f"Game ended by {ctx.author.display_name}")
+        
+        await ctx.send(embed=final_embed)
         
         # Log to ban logs channel
         log_channel = self.bot.get_channel(self.config['ban_logs'])
