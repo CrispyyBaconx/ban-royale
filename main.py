@@ -8,7 +8,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 # TODO:
-# implement inverse curve for ban chance as more people are banned
+# ✅ implement inverse curve for ban chance as more people are banned (DONE - decay mode)
 # exclude users above bot role + those with bot master
 
 # Load environment variables from .env file
@@ -21,6 +21,9 @@ CONFIG = {
     "ban_channel": int(os.getenv('BAN_CHANNEL', '1400583337176862732')),
     "ban_chance": float(os.getenv('BAN_CHANCE', '0.99')),
     "ban_delay": float(os.getenv('BAN_DELAY', '2.0')),
+    "decay_mode": os.getenv('DECAY_MODE', 'false').lower() == 'true',
+    "min_decay_chance": float(os.getenv('MIN_DECAY_CHANCE', '0.01')),
+    "max_decay_chance": float(os.getenv('MAX_DECAY_CHANCE', '0.99')),
     "react_emoji": os.getenv('REACT_EMOJI', '✅'),
 }
 
@@ -115,6 +118,115 @@ class Main(commands.Cog):
             return True
         return False
 
+    def get_effective_member_count(self, guild):
+        """Get the effective member count for decay calculations (excluding bots and bot masters)"""
+        if not guild:
+            return 0
+        
+        effective_count = 0
+        bot_master_role_id = self.config['bot_master']
+        
+        for member in guild.members:
+            # Skip bots
+            if member.bot:
+                continue
+            
+            # Skip users with bot master role
+            if any(role.id == bot_master_role_id for role in member.roles):
+                continue
+            
+            effective_count += 1
+        
+        return effective_count
+    
+    def get_logged_checkpoints(self, guild_id):
+        """Get the list of checkpoints already logged for a server"""
+        all_data = self.load_all_banned_data()
+        guild_data = all_data.get(str(guild_id), {})
+        return guild_data.get("_logged_checkpoints", [])
+    
+    def add_logged_checkpoint(self, guild_id, checkpoint):
+        """Add a checkpoint to the logged list for a server"""
+        all_data = self.load_all_banned_data()
+        guild_id_str = str(guild_id)
+        
+        if guild_id_str not in all_data:
+            all_data[guild_id_str] = {}
+        
+        logged_checkpoints = all_data[guild_id_str].get("_logged_checkpoints", [])
+        if checkpoint not in logged_checkpoints:
+            logged_checkpoints.append(checkpoint)
+            all_data[guild_id_str]["_logged_checkpoints"] = sorted(logged_checkpoints)
+            
+            with open(self.banned_users_file, 'w') as f:
+                json.dump(all_data, f, indent=2)
+    
+    async def check_and_log_checkpoints(self, guild):
+        """Check if we've hit new decay checkpoints and log them"""
+        if not self.config['decay_mode'] or not guild:
+            return
+        
+        effective_count = self.get_effective_member_count(guild)
+        banned_count = len(self.load_banned_users(guild.id))
+        
+        if effective_count <= 0:
+            return
+        
+        progress_percentage = (banned_count / effective_count) * 100
+        checkpoints = [10, 20, 30, 40, 50, 60, 70, 80, 90, 95]
+        logged_checkpoints = self.get_logged_checkpoints(guild.id)
+        
+        for checkpoint in checkpoints:
+            if progress_percentage >= checkpoint and checkpoint not in logged_checkpoints:
+                # Calculate current ban chance for this checkpoint
+                current_chance = self.calculate_decay_chance(guild)
+                
+                # Log to ban logs channel
+                log_channel = self.bot.get_channel(self.config['ban_logs'])
+                if log_channel:
+                    await log_channel.send(
+                        f"📊 **Decay Checkpoint {checkpoint}%** reached!\n"
+                        f"Progress: {banned_count}/{effective_count} banned ({progress_percentage:.1f}%)\n"
+                        f"Current ban chance: **{current_chance*100:.1f}%**"
+                    )
+                
+                # Mark this checkpoint as logged
+                self.add_logged_checkpoint(guild.id, checkpoint)
+    
+    def calculate_decay_chance(self, guild):
+        """Calculate ban chance using decay mode (inverse curve)"""
+        if not guild:
+            return self.config['ban_chance']
+        
+        effective_members = self.get_effective_member_count(guild)
+        banned_users = self.load_banned_users(guild.id)
+        banned_count = len(banned_users)
+        
+        if effective_members <= 0:
+            # No valid members to calculate from, use default ban chance
+            return self.config['ban_chance']
+        
+        # Calculate decay factor: as more people are banned, chance decreases
+        # decay_factor ranges from 0 (all banned) to 1 (none banned)
+        remaining_members = max(0, effective_members - banned_count)
+        decay_factor = remaining_members / effective_members
+        
+        # Apply inverse curve: higher decay_factor = higher ban chance
+        min_chance = self.config['min_decay_chance']
+        max_chance = self.config['max_decay_chance']
+        
+        # Inverse curve: chance starts high and decreases as people are banned
+        decay_chance = min_chance + (max_chance - min_chance) * decay_factor
+        
+        return decay_chance
+    
+    def get_current_ban_chance(self, guild):
+        """Get the current ban chance (either normal or decay mode)"""
+        if self.config['decay_mode']:
+            return self.calculate_decay_chance(guild)
+        else:
+            return self.config['ban_chance']
+
     @commands.command(name="enable")
     async def _enable(self, ctx):
         """Enable or disable the Ban Royale functionality"""
@@ -168,7 +280,8 @@ class Main(commands.Cog):
         if ctx.author.top_role.position <= user.top_role.position:
             return await ctx.send(f"{ctx.author.mention}, You can't ban that person!")
 
-        if random.random() < self.config['ban_chance']:
+        current_chance = self.get_current_ban_chance(ctx.guild)
+        if random.random() < current_chance:
             retry_count = 0
             max_retries = 3
             success = False
@@ -197,6 +310,14 @@ class Main(commands.Cog):
                 log_channel = self.bot.get_channel(self.config['ban_logs'])
                 if log_channel:
                     await log_channel.send(f"{ctx.author.mention} banned {user.mention}!")
+                
+                # Check and log decay checkpoints if in decay mode
+                await self.check_and_log_checkpoints(ctx.guild)
+                
+                # Check win condition and end game if met
+                game_ended = await self.check_win_condition(ctx.guild)
+                if game_ended:
+                    return  # Game ended, no need for delay
                 
                 # Add configurable delay after successful ban
                 if self.config['ban_delay'] > 0:
@@ -259,6 +380,71 @@ class Main(commands.Cog):
         else:
             await ctx.send(f"Ban delay has been set to **{delay} seconds**!")
 
+    @commands.command(name="decay", aliases=['d'])
+    async def _decay(self, ctx):
+        """Toggle decay mode on/off"""
+        # need to be a bot master to use this command
+        if not any(role.id == self.config['bot_master'] for role in ctx.author.roles):
+            return await ctx.send(f"{ctx.author.mention}, You don't have permission to use this command!")
+        
+        self.config['decay_mode'] = not self.config['decay_mode']
+        status = "**enabled**" if self.config['decay_mode'] else "**disabled**"
+        await ctx.send(f"Decay mode has been {status}!")
+        
+        if self.config['decay_mode']:
+            effective_count = self.get_effective_member_count(ctx.guild)
+            await ctx.send(f"📊 Effective members for decay calculations: **{effective_count}** (excluding bots and bot masters)")
+
+    @commands.command(name="decaymin", aliases=['dmin'])
+    async def _decaymin(self, ctx):
+        """Set the minimum decay chance percentage"""
+        # need to be a bot master to use this command
+        if not any(role.id == self.config['bot_master'] for role in ctx.author.roles):
+            return await ctx.send(f"{ctx.author.mention}, You don't have permission to use this command!")
+        
+        try: 
+            chance = float(ctx.message.content.split(" ")[1])
+        except IndexError:
+            return await ctx.send(f"{ctx.author.mention}, Please enter a valid number between **0.01** and **100**!")
+        except ValueError:
+            return await ctx.send(f"{ctx.author.mention}, Please enter a valid number between **0.01** and **100**!")
+        
+        chance = chance / 100  # convert to decimal
+        if chance < 0.0001:
+            return await ctx.send(f"{ctx.author.mention}, The minimum decay chance is **0.01%**!")
+        if chance > 1.0:
+            return await ctx.send(f"{ctx.author.mention}, The maximum decay chance is **100%**!")
+        if chance >= self.config['max_decay_chance']:
+            return await ctx.send(f"{ctx.author.mention}, Minimum decay chance must be less than maximum decay chance ({self.config['max_decay_chance']*100:.1f}%)!")
+        
+        self.config['min_decay_chance'] = chance
+        await ctx.send(f"Minimum decay chance has been set to **{chance*100:.1f}%**!")
+
+    @commands.command(name="decaymax", aliases=['dmax'])
+    async def _decaymax(self, ctx):
+        """Set the maximum decay chance percentage"""
+        # need to be a bot master to use this command
+        if not any(role.id == self.config['bot_master'] for role in ctx.author.roles):
+            return await ctx.send(f"{ctx.author.mention}, You don't have permission to use this command!")
+        
+        try: 
+            chance = float(ctx.message.content.split(" ")[1])
+        except IndexError:
+            return await ctx.send(f"{ctx.author.mention}, Please enter a valid number between **0.01** and **100**!")
+        except ValueError:
+            return await ctx.send(f"{ctx.author.mention}, Please enter a valid number between **0.01** and **100**!")
+        
+        chance = chance / 100  # convert to decimal
+        if chance < 0.0001:
+            return await ctx.send(f"{ctx.author.mention}, The minimum decay chance is **0.01%**!")
+        if chance > 1.0:
+            return await ctx.send(f"{ctx.author.mention}, The maximum decay chance is **100%**!")
+        if chance <= self.config['min_decay_chance']:
+            return await ctx.send(f"{ctx.author.mention}, Maximum decay chance must be greater than minimum decay chance ({self.config['min_decay_chance']*100:.1f}%)!")
+        
+        self.config['max_decay_chance'] = chance
+        await ctx.send(f"Maximum decay chance has been set to **{chance*100:.1f}%**!")
+
     @commands.command(name="config", aliases=['cfg'])
     async def _config(self, ctx):
         """Display current bot configuration"""
@@ -277,28 +463,225 @@ class Main(commands.Cog):
         embed.add_field(name="Status", value=status, inline=True)
         
         # Ban settings
-        embed.add_field(name="Ban Chance", value=f"{self.config['ban_chance']*100:.1f}%", inline=True)
+        if self.config['decay_mode']:
+            current_chance = self.get_current_ban_chance(ctx.guild)
+            embed.add_field(name="Current Ban Chance (Decay)", value=f"{current_chance*100:.1f}%", inline=True)
+        else:
+            embed.add_field(name="Ban Chance (Static)", value=f"{self.config['ban_chance']*100:.1f}%", inline=True)
+        
         embed.add_field(name="Ban Delay", value=f"{self.config['ban_delay']:.1f}s", inline=True)
         
-        # Channel info (show names if possible, otherwise just indicate they're set)
+        # Decay mode settings
+        decay_status = "🟢 Enabled" if self.config['decay_mode'] else "🔴 Disabled"
+        embed.add_field(name="Decay Mode", value=decay_status, inline=True)
+        
+        if self.config['decay_mode']:
+            effective_count = self.get_effective_member_count(ctx.guild)
+            banned_count = len(self.load_banned_users(ctx.guild.id))
+            logged_checkpoints = self.get_logged_checkpoints(ctx.guild.id)
+            
+            embed.add_field(name="Decay Range", value=f"{self.config['min_decay_chance']*100:.1f}% - {self.config['max_decay_chance']*100:.1f}%", inline=True)
+            embed.add_field(name="Effective Members", value=f"{effective_count} (excl. bots/masters)", inline=True)
+            embed.add_field(name="Progress", value=f"{banned_count}/{effective_count} banned", inline=True)
+            
+            # Show logged checkpoints
+            if logged_checkpoints:
+                checkpoint_str = ", ".join([f"{cp}%" for cp in sorted(logged_checkpoints)])
+                embed.add_field(name="Logged Checkpoints", value=checkpoint_str, inline=True)
+            else:
+                embed.add_field(name="Logged Checkpoints", value="None yet", inline=True)
+        
+        # Channel info (show clickable links)
         ban_channel = self.bot.get_channel(self.config['ban_channel'])
-        ban_channel_name = ban_channel.name if ban_channel else "Channel not found"
-        embed.add_field(name="Ban Channel", value=f"#{ban_channel_name}", inline=True)
+        if ban_channel:
+            embed.add_field(name="Ban Channel", value=f"<#{self.config['ban_channel']}>", inline=True)
+        else:
+            embed.add_field(name="Ban Channel", value="Channel not found", inline=True)
         
         logs_channel = self.bot.get_channel(self.config['ban_logs'])
-        logs_channel_name = logs_channel.name if logs_channel else "Channel not found"
-        embed.add_field(name="Logs Channel", value=f"#{logs_channel_name}", inline=True)
+        if logs_channel:
+            embed.add_field(name="Logs Channel", value=f"<#{self.config['ban_logs']}>", inline=True)
+        else:
+            embed.add_field(name="Logs Channel", value="Channel not found", inline=True)
         
         # React emoji
         embed.add_field(name="React Emoji", value=self.config['react_emoji'], inline=True)
         
-        # Server-specific stats
+        # Server-specific stats  
         banned_users = self.load_banned_users(ctx.guild.id)
         embed.add_field(name="Banned Users (This Server)", value=str(len(banned_users)), inline=True)
         
         embed.set_footer(text=f"Server: {ctx.guild.name}")
         
         await ctx.send(embed=embed)
+
+    def reset_game_state(self, guild_id):
+        """Reset all game state for a server (checkpoints and banned users)"""
+        all_data = self.load_all_banned_data()
+        guild_id_str = str(guild_id)
+        
+        if guild_id_str in all_data:
+            del all_data[guild_id_str]
+            
+            with open(self.banned_users_file, 'w') as f:
+                json.dump(all_data, f, indent=2)
+            return True
+        return False
+
+    async def check_win_condition(self, guild):
+        """Check if win condition is met and handle game end"""
+        if not self.enabled or not guild:
+            return False
+        
+        effective_count = self.get_effective_member_count(guild)
+        banned_count = len(self.load_banned_users(guild.id))
+        remaining_members = effective_count - banned_count
+        
+        if remaining_members <= 1:
+            # Win condition met! Disable the bot but preserve game state
+            self.enabled = False
+            
+            log_channel = self.bot.get_channel(self.config['ban_logs'])
+            if log_channel:
+                if remaining_members == 1:
+                    await log_channel.send(
+                        f"🏆 **GAME OVER - We have a winner!** 🏆\n"
+                        f"Only **1 participant** remains out of {effective_count} original members!\n"
+                        f"Ban Royale has been **disabled**. Use `!endgame` to unban all participants and reset for the next event."
+                    )
+                else:
+                    await log_channel.send(
+                        f"🏁 **GAME OVER - All participants eliminated!** 🏁\n"
+                        f"All {effective_count} participants have been banned!\n"
+                        f"Ban Royale has been **disabled**. Use `!endgame` to unban all participants and reset for the next event."
+                    )
+            
+            return True
+        
+        return False
+
+    async def perform_mass_unban(self, ctx, banned_users):
+        """Helper function to perform mass unban with progress tracking"""
+        total_users = len(banned_users)
+        unbanned_count = 0
+        failed_count = 0
+        processed_count = 0
+        
+        # Send initial progress message
+        progress_msg = await ctx.send(f"Unbanning {total_users} users... Progress: 0/{total_users} processed...")
+        
+        banned_users_list = list(banned_users.items())
+        
+        for i, (user_id_str, user_info) in enumerate(banned_users_list):
+            user_id = int(user_id_str)
+            processed_count += 1
+            
+            retry_count = 0
+            max_retries = 3
+            success = False
+            
+            while retry_count < max_retries and not success:
+                try:
+                    ban_entry = await ctx.guild.fetch_ban(discord.Object(id=user_id))
+                    await ctx.guild.unban(ban_entry.user, reason=f"Game ended by {ctx.author.name}")
+                    self.remove_banned_user(ctx.guild.id, user_id)
+                    unbanned_count += 1
+                    success = True
+                    
+                except discord.NotFound:
+                    # User is not actually banned, remove from tracking
+                    self.remove_banned_user(ctx.guild.id, user_id)
+                    unbanned_count += 1  # Count as success since they're no longer banned
+                    success = True
+                    
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limited
+                        retry_count += 1
+                        wait_time = min(retry_count * 5, 30)  # Progressive backoff, max 30 seconds
+                        await asyncio.sleep(wait_time)
+                    else:
+                        failed_count += 1
+                        success = True  # Don't retry for other HTTP errors
+                        
+                except discord.Forbidden:
+                    failed_count += 1
+                    success = True  # Don't retry for permission errors
+            
+            if not success:
+                failed_count += 1
+            
+            # Add delay between operations to avoid rate limiting (1.5 seconds)
+            await asyncio.sleep(1.5)
+            
+            # Update progress every 5 users or on the last user
+            if processed_count % 5 == 0 or processed_count == total_users:
+                try:
+                    await progress_msg.edit(content=f"Progress: {processed_count}/{total_users} processed... (Unbanned: {unbanned_count}, Failed: {failed_count})")
+                except discord.HTTPException:
+                    # If we can't edit the progress message, continue anyway
+                    pass
+        
+        return unbanned_count, failed_count
+
+    @commands.command(name="endgame", aliases=['eg'])
+    async def _end_game(self, ctx):
+        """Manually end the current game, disable bot, and unban all participants"""
+        # need to be a bot master to use this command
+        if not any(role.id == self.config['bot_master'] for role in ctx.author.roles):
+            return await ctx.send(f"{ctx.author.mention}, You don't have permission to use this command!")
+        
+        effective_count = self.get_effective_member_count(ctx.guild)
+        banned_users = self.load_banned_users(ctx.guild.id)
+        banned_count = len(banned_users)
+        
+        if banned_count == 0:
+            return await ctx.send(f"{ctx.author.mention}, No game is currently in progress!")
+        
+        # Check current state
+        was_decay_mode = self.config['decay_mode']
+        was_already_disabled = not self.enabled
+        remaining_count = effective_count - banned_count
+        
+        if was_already_disabled:
+            await ctx.send(f"🏁 **Cleaning up completed game...**\nFinal stats: {banned_count}/{effective_count} participants were banned, {remaining_count} remain.")
+        else:
+            await ctx.send(f"🏁 **Ending game and shutting down Ban Royale...**\nFinal stats: {banned_count}/{effective_count} participants were banned, {remaining_count} remain.")
+        
+        # Perform mass unban
+        unbanned_count, failed_count = await self.perform_mass_unban(ctx, banned_users)
+        
+        # Disable the bot (if not already disabled)
+        if not was_already_disabled:
+            self.enabled = False
+        
+        # Reset decay mode if it was enabled
+        if was_decay_mode:
+            self.config['decay_mode'] = False
+        
+        # Reset game state (clear checkpoints and any remaining tracking)
+        self.reset_game_state(ctx.guild.id)
+        
+        # Final status message
+        status_msg = f"✅ **Game cleanup completed!**\n"
+        if not was_already_disabled:
+            status_msg += f"• Ban Royale has been **disabled**\n"
+        if was_decay_mode:
+            status_msg += f"• Decay mode has been **reset**\n"
+        status_msg += f"• Unbanned **{unbanned_count}** users (Failed: **{failed_count}**)\n"
+        status_msg += f"• Game state has been **cleared**"
+        
+        await ctx.send(status_msg)
+        
+        # Log to ban logs channel
+        log_channel = self.bot.get_channel(self.config['ban_logs'])
+        if log_channel:
+            log_msg = f"🏁 **GAME ENDED** by {ctx.author.mention}\n"
+            log_msg += f"Final stats: {banned_count}/{effective_count} banned, {remaining_count} remained\n"
+            log_msg += f"Unbanned: {unbanned_count}, Failed: {failed_count}\n"
+            log_msg += f"Ban Royale disabled"
+            if was_decay_mode:
+                log_msg += f", Decay mode reset"
+            await log_channel.send(log_msg)
 
     @commands.command(name="unbanall", aliases=['ua'])
     async def _unbanall(self, ctx):
