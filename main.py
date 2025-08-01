@@ -67,6 +67,7 @@ class Main(commands.Cog):
         self.config = self.bot.config
         self.enabled = False
         self.banned_users_file = "event_banned_users.json"
+        self.session_ban_counts = {}  # Track ban counts per user per session
 
     def load_all_banned_data(self):
         """Load all banned users data from the file"""
@@ -238,7 +239,9 @@ class Main(commands.Cog):
             return await ctx.send(f"{ctx.author.mention}, Ban Royale is already enabled!")
         
         self.enabled = True
-        await ctx.send(f"Ban Royale has been **enabled**!")
+        # Reset ban counts for new game
+        self.session_ban_counts.clear()
+        await ctx.send(f"Ban Royale has been **enabled**! Session ban counts reset.")
 
     @commands.command(name="disable")
     async def _disable(self, ctx):
@@ -277,7 +280,9 @@ class Main(commands.Cog):
         if user.id == ctx.author.id: 
             return await ctx.send(f"{ctx.author.mention}, You can't ban yourself.")
 
-        if ctx.author.top_role.position <= user.top_role.position:
+        # Allow users without roles (only @everyone) to ban anyone
+        # Only apply role hierarchy check if the author has roles above @everyone
+        if ctx.author.top_role.position > 0 and ctx.author.top_role.position <= user.top_role.position:
             return await ctx.send(f"{ctx.author.mention}, You can't ban that person!")
 
         current_chance = self.get_current_ban_chance(ctx.guild)
@@ -307,9 +312,23 @@ class Main(commands.Cog):
             
             if success:
                 await ctx.message.add_reaction(self.config['react_emoji'])
+                
+                # Update session ban count
+                user_id = str(ctx.author.id)
+                if user_id not in self.session_ban_counts:
+                    self.session_ban_counts[user_id] = 0
+                self.session_ban_counts[user_id] += 1
+                ban_count = self.session_ban_counts[user_id]
+                
+                # Send message to ban channel with ban count
+                ban_channel = self.bot.get_channel(self.config['ban_channel'])
+                if ban_channel:
+                    await ban_channel.send(f"{ctx.author.mention} banned {user.mention}! **(Ban #{ban_count})**")
+                
+                # Send log to logs channel
                 log_channel = self.bot.get_channel(self.config['ban_logs'])
                 if log_channel:
-                    await log_channel.send(f"{ctx.author.mention} banned {user.mention}!")
+                    await log_channel.send(f"{ctx.author.mention} banned {user.mention}! (Ban #{ban_count})")
                 
                 # Check and log decay checkpoints if in decay mode
                 await self.check_and_log_checkpoints(ctx.guild)
@@ -520,6 +539,9 @@ class Main(commands.Cog):
         all_data = self.load_all_banned_data()
         guild_id_str = str(guild_id)
         
+        # Reset session ban counts
+        self.session_ban_counts.clear()
+        
         if guild_id_str in all_data:
             del all_data[guild_id_str]
             
@@ -560,12 +582,28 @@ class Main(commands.Cog):
         
         return False
 
+    def get_progress_increment(self, total_users):
+        """Calculate appropriate progress update increment based on total users"""
+        if total_users <= 10:
+            return 1  # Update every user
+        elif total_users <= 50:
+            return 5  # Update every 5 users
+        elif total_users <= 100:
+            return 10  # Update every 10 users
+        elif total_users <= 200:
+            return 20  # Update every 20 users
+        else:
+            return max(25, total_users // 10)  # Update every 25 users or 10% of total, whichever is larger
+    
     async def perform_mass_unban(self, ctx, banned_users):
         """Helper function to perform mass unban with progress tracking"""
         total_users = len(banned_users)
         unbanned_count = 0
         failed_count = 0
         processed_count = 0
+        
+        # Calculate progress increment based on total users
+        progress_increment = self.get_progress_increment(total_users)
         
         # Send initial progress message
         progress_msg = await ctx.send(f"Unbanning {total_users} users... Progress: 0/{total_users} processed...")
@@ -613,8 +651,8 @@ class Main(commands.Cog):
             # Add delay between operations to avoid rate limiting (1.5 seconds)
             await asyncio.sleep(1.5)
             
-            # Update progress every 5 users or on the last user
-            if processed_count % 5 == 0 or processed_count == total_users:
+            # Update progress based on calculated increment or on the last user
+            if processed_count % progress_increment == 0 or processed_count == total_users:
                 try:
                     await progress_msg.edit(content=f"Progress: {processed_count}/{total_users} processed... (Unbanned: {unbanned_count}, Failed: {failed_count})")
                 except discord.HTTPException:
@@ -668,7 +706,8 @@ class Main(commands.Cog):
         if was_decay_mode:
             status_msg += f"• Decay mode has been **reset**\n"
         status_msg += f"• Unbanned **{unbanned_count}** users (Failed: **{failed_count}**)\n"
-        status_msg += f"• Game state has been **cleared**"
+        status_msg += f"• Game state has been **cleared**\n"
+        status_msg += f"• Session ban counts have been **reset**"
         
         await ctx.send(status_msg)
         
@@ -701,6 +740,9 @@ class Main(commands.Cog):
         unbanned_count = 0
         failed_count = 0
         processed_count = 0
+        
+        # Calculate progress increment based on total users
+        progress_increment = self.get_progress_increment(total_users)
         
         # Send initial progress message
         progress_msg = await ctx.send(f"Progress: 0/{total_users} processed...")
@@ -748,8 +790,8 @@ class Main(commands.Cog):
             # Add delay between operations to avoid rate limiting (1.5 seconds)
             await asyncio.sleep(1.5)
             
-            # Update progress every 5 users or on the last user
-            if processed_count % 5 == 0 or processed_count == total_users:
+            # Update progress based on calculated increment or on the last user
+            if processed_count % progress_increment == 0 or processed_count == total_users:
                 try:
                     await progress_msg.edit(content=f"Progress: {processed_count}/{total_users} processed... (Unbanned: {unbanned_count}, Failed: {failed_count})")
                 except discord.HTTPException:
