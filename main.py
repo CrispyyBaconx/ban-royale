@@ -323,12 +323,12 @@ class Main(commands.Cog):
                 # Send message to ban channel with ban count
                 ban_channel = self.bot.get_channel(self.config['ban_channel'])
                 if ban_channel:
-                    await ban_channel.send(f"{ctx.author.mention} banned {user.mention}! **(Ban #{ban_count})**")
+                    await ban_channel.send(f"{ctx.author.mention} banned {user.mention}! **({ban_count})**")
                 
                 # Send log to logs channel
                 log_channel = self.bot.get_channel(self.config['ban_logs'])
                 if log_channel:
-                    await log_channel.send(f"{ctx.author.mention} banned {user.mention}! (Ban #{ban_count})")
+                    await log_channel.send(f"{ctx.author.mention} banned {user.mention}! ({ban_count})")
                 
                 # Check and log decay checkpoints if in decay mode
                 await self.check_and_log_checkpoints(ctx.guild)
@@ -463,6 +463,58 @@ class Main(commands.Cog):
         
         self.config['max_decay_chance'] = chance
         await ctx.send(f"Maximum decay chance has been set to **{chance*100:.1f}%**!")
+
+    @commands.command(name="help", aliases=['h', 'commands'])
+    async def _help(self, ctx):
+        """Display all available commands"""
+        embed = discord.Embed(
+            title="🤖 Ban Royale Commands",
+            description="All available commands for the Ban Royale bot",
+            color=0x00ff00
+        )
+        
+        # Basic Commands
+        basic_commands = [
+            "`!enable` - Enable the bot royale functionality (Bot Master only)",
+            "`!disable` - Disable the bot royale functionality (Bot Master only)",
+            "`!ban <user>` or `!b <user>` - Attempt to ban a user with a configurable chance",
+            "`!banchance <percentage>` or `!bc <percentage>` - Set the ban success chance (Bot Master only)",
+            "`!bandelay <seconds>` or `!bd <seconds>` - Set delay between ban operations (0-60 seconds, Bot Master only)",
+            "`!config` or `!cfg` - Display current bot configuration in an embed (Bot Master only)",
+            "`!endgame` or `!eg` - End the current game, disable bot, unban all participants, and reset state (Bot Master only)"
+        ]
+        embed.add_field(
+            name="📋 Basic Commands",
+            value="\n".join(basic_commands),
+            inline=False
+        )
+        
+        # Decay Mode Commands
+        decay_commands = [
+            "`!decay` or `!d` - Toggle decay mode on/off (Bot Master only)",
+            "`!decaymin <percentage>` or `!dmin <percentage>` - Set minimum decay chance (Bot Master only)",
+            "`!decaymax <percentage>` or `!dmax <percentage>` - Set maximum decay chance (Bot Master only)"
+        ]
+        embed.add_field(
+            name="📉 Decay Mode Commands",
+            value="\n".join(decay_commands),
+            inline=False
+        )
+        
+        # Unban Commands
+        unban_commands = [
+            "`!unbanall` or `!ua` - Unban all users who were banned during the event (Bot Master only)"
+        ]
+        embed.add_field(
+            name="🔓 Unban Commands",
+            value="\n".join(unban_commands),
+            inline=False
+        )
+        
+        # Footer
+        embed.set_footer(text="Note: Bot Master commands require the configured Bot Master role")
+        
+        await ctx.send(embed=embed)
 
     @commands.command(name="config", aliases=['cfg'])
     async def _config(self, ctx):
@@ -734,7 +786,8 @@ class Main(commands.Cog):
         if not banned_users:
             return await ctx.send(f"{ctx.author.mention}, No users are currently tracked as banned during this event!")
         
-        total_users = len(banned_users)
+        # Count only actual user IDs (exclude special keys that start with underscore)
+        total_users = len([user_id for user_id in banned_users.keys() if not user_id.startswith('_')])
         await ctx.send(f"Starting to unban {total_users} users banned during the event... This may take a while to avoid rate limits.")
         
         unbanned_count = 0
@@ -750,6 +803,9 @@ class Main(commands.Cog):
         banned_users_list = list(banned_users.items())
         
         for i, (user_id_str, user_info) in enumerate(banned_users_list):
+            # Skip special keys that start with underscore (like '_logged_checkpoints')
+            if user_id_str.startswith('_'):
+                continue
             user_id = int(user_id_str)
             processed_count += 1
             

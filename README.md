@@ -19,6 +19,7 @@ python main.py
 ## Commands
 
 ### Basic Commands
+- `!help` or `!h` or `!commands` - Display all available commands in a formatted embed
 - `!enable` - Enable the bot royale functionality (Bot Master only)
 - `!disable` - Disable the bot royale functionality (Bot Master only)
 - `!ban <user>` or `!b <user>` - Attempt to ban a user with a configurable chance
