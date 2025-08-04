@@ -357,18 +357,20 @@ class BasicCommands(commands.Cog):
         
         embed.add_field(name="Ban Delay", value=f"{main.config['ban_delay']:.1f}s", inline=True)
         
+        # Member count (always show)
+        effective_count = main.get_effective_member_count(ctx.guild)
+        banned_count = len(main.load_banned_users(ctx.guild.id))
+        embed.add_field(name="Members", value=f"{effective_count} (excl. bots/masters)", inline=True)
+        embed.add_field(name="Progress", value=f"{banned_count}/{effective_count} banned", inline=True)
+        
         # Decay mode settings
         decay_status = "🟢 Enabled" if main.config['decay_mode'] else "🔴 Disabled"
         embed.add_field(name="Decay Mode", value=decay_status, inline=True)
         
         if main.config['decay_mode']:
-            effective_count = main.get_effective_member_count(ctx.guild)
-            banned_count = len(main.load_banned_users(ctx.guild.id))
             logged_checkpoints = main.get_logged_checkpoints(ctx.guild.id)
             
             embed.add_field(name="Decay Range", value=f"{main.config['min_decay_chance']*100:.1f}% - {main.config['max_decay_chance']*100:.1f}%", inline=True)
-            embed.add_field(name="Effective Members", value=f"{effective_count} (excl. bots/masters)", inline=True)
-            embed.add_field(name="Progress", value=f"{banned_count}/{effective_count} banned", inline=True)
             
             # Show logged checkpoints
             if logged_checkpoints:
