@@ -36,7 +36,7 @@ class MiscCommands(commands.Cog):
         # anyone can use this command
         # it just kicks the person who sent the command
         chances = [chance for _, chance, _ in self.gooning_pool]
-        message, _, action = random.choices(self.gooning_pool, weights=chances, k=1)
+        message, _, action = random.choices(self.gooning_pool, weights=chances, k=1)[0]
 
         await ctx.send(f"{ctx.author.mention}{message}")
         match action:
@@ -49,6 +49,11 @@ class MiscCommands(commands.Cog):
             case Action.NITRO:
                 # send an ephemeral message with a stored nitro link
                 await ctx.send(f"{ctx.author.mention}, here's your nitro: 🖕", ephemeral=True)
+                # remove nitro from the pool once claimed
+                self.gooning_pool = [item for item in self.gooning_pool if item[2] != Action.NITRO]
+                # normalize the remaining chances so they sum to 1
+                total_chance = sum(chance for _, chance, _ in self.gooning_pool)
+                self.gooning_pool = [(message, chance/total_chance, action) for message, chance, action in self.gooning_pool]
 
 
 async def setup(bot: commands.Bot):
