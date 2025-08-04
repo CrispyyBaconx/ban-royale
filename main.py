@@ -21,6 +21,31 @@ CONFIG = {
     "spectator_role": os.getenv('SPECTATOR_ROLE_NAME', 'Ban Royale Spectator')
 }
 
+class NitroButtonView(discord.ui.View):
+    """Button view for claiming nitro on main game win"""
+    
+    def __init__(self, winner_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.winner_id = winner_id
+    
+    @discord.ui.button(label='🎁 Claim Nitro', style=discord.ButtonStyle.primary, emoji='🎁')
+    async def claim_nitro(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only the winner can claim the nitro
+        if interaction.user.id != self.winner_id:
+            await interaction.response.send_message("❌ Only the winner can claim this nitro!", ephemeral=True)
+            return
+        
+        # Load nitro link from environment variable
+        nitro_link = os.getenv('MAIN_NITRO_LINK', '').strip()
+        if nitro_link:
+            await interaction.response.send_message(f"🎉 Congratulations! Here's your nitro: {nitro_link}", ephemeral=True)
+            # Disable the button after claiming
+            button.disabled = True
+            button.label = "✅ Claimed!"
+            await interaction.edit_original_response(view=self)
+        else:
+            await interaction.response.send_message("hehe u got tricked theres no nitro", ephemeral=True)
+
 class BotRoyaleBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -443,11 +468,17 @@ class Main(commands.Cog):
                 )
                 win_embed.set_footer(text=f"🎉 Congratulations {winner.display_name}!")
                 
+                # Check if nitro is available or if we should show the fake button
+                nitro_link = os.getenv('MAIN_NITRO_LINK', '').strip()
+                view = None
+                if nitro_link or True:  # Always show button, let the interaction handle the logic
+                    view = NitroButtonView(winner.id)
+                
                 # Send to both channels
                 if log_channel:
-                    await log_channel.send(embed=win_embed)
+                    await log_channel.send(embed=win_embed, view=view)
                 if ban_channel:
-                    await ban_channel.send(embed=win_embed)
+                    await ban_channel.send(embed=win_embed, view=view)
             else:
                 elimination_embed = discord.Embed(
                     title="🏁 GAME OVER - Total Elimination! 🏁",

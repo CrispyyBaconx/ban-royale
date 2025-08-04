@@ -2,6 +2,7 @@ from discord.ext import commands
 from enum import Enum
 import random
 import datetime
+import os
 
 class Action(Enum):
     KICK = "kick"
@@ -47,8 +48,12 @@ class MiscCommands(commands.Cog):
             case Action.BAN:
                 await ctx.author.ban(reason="You were banned for gooning in a server full of children, seek help")
             case Action.NITRO:
-                # send an ephemeral message with a stored nitro link
-                await ctx.send(f"{ctx.author.mention}, here's your nitro: 🖕", ephemeral=True)
+                # load nitro link from environment variable
+                nitro_link = os.getenv('GOON_NITRO_LINK', '').strip()
+                if nitro_link:
+                    await ctx.send(f"{ctx.author.mention}, here's your nitro: {nitro_link}", ephemeral=True)
+                else:
+                    await ctx.send(f"{ctx.author.mention}, here's your nitro: 🖕", ephemeral=True)
                 # remove nitro from the pool once claimed
                 self.gooning_pool = [item for item in self.gooning_pool if item[2] != Action.NITRO]
                 # normalize the remaining chances so they sum to 1
