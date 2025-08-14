@@ -22,9 +22,9 @@ class MiscCommands(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.gooning_pool: list[tuple[str, float, Action]] = [
-            ["was kicked for gooning in a server full of children", 0.5, Action.KICK], 
-            ["was muted for gooning in a public park", 0.4, Action.MUTE],
-            ["stop gooning", 0.09, Action.BAN],
+            [" was kicked for gooning in a server full of children", 0.5, Action.KICK], 
+            [" was muted for gooning in a public park", 0.4, Action.MUTE],
+            [" stop gooning", 0.09, Action.BAN],
             [", congrats! you gooned your way to 1 month of discord nitro", 0.01, Action.NITRO],
         ]
         gooning_pool_sum = sum(chance for _, chance, _ in self.gooning_pool)
